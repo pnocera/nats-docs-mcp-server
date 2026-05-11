@@ -2,6 +2,7 @@ package fetcher
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -54,6 +55,20 @@ func OpenLocalArchive(ctx context.Context, archivePath string, limits ArchiveLim
 	defer reader.Close()
 
 	return openZip(ctx, &reader.Reader, limits)
+}
+
+// OpenArchiveBytes opens a zip archive from memory and validates entries before
+// returning them in memory.
+func OpenArchiveBytes(ctx context.Context, data []byte, limits ArchiveLimits) (*Archive, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("archive bytes cannot be empty")
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to open archive bytes: %w", err)
+	}
+	return openZip(ctx, reader, limits)
 }
 
 // openZip validates and reads regular files from a zip reader.

@@ -1,9 +1,11 @@
-# NATS Documentation MCP Server
+# NATS Documentation Tools
 
-A Model Context Protocol (MCP) server that provides LLMs with programmatic access to NATS documentation from https://docs.nats.io/. Optionally supports dual documentation sources including Synadia Control Plane documentation.
+Standalone tools that provide programmatic access to NATS documentation from https://docs.nats.io/. The primary interface is the MCP-independent `nats-docs` CLI, with an MCP server available for MCP clients.
 
 ## Features
 
+- **Standalone `nats-docs` CLI** for searching and retrieving NATS docs without MCP
+- **Single executable CLI distribution** with the NATS docs archive embedded by default
 - **MCP-compliant server** exposing documentation search and retrieval tools
 - **Dual documentation sources** - NATS documentation (always enabled) and optional Synadia Control Plane documentation
 - **Intelligent query classification** - Automatically routes queries to appropriate documentation source based on keywords
@@ -41,13 +43,46 @@ cd nats-docs-mcp-server
 # Build with GoReleaser
 goreleaser build --snapshot --clean
 
-# Binary will be in dist/ directory
+# Binaries will be in the dist/ directory
+./dist/nats-docs-cli_linux_amd64_v1/nats-docs version
 ./dist/nats-docs-mcp-server_linux_amd64_v1/nats-docs-mcp-server --version
+
+# Or build the standalone CLI directly
+go build -o nats-docs ./cmd/nats-docs-cli
+./nats-docs doctor
+```
+
+## CLI Usage
+
+`nats-docs` is the primary non-MCP interface. It embeds the downloaded `nats.docs` archive, so the binary can be moved and run as a single executable without a runtime docs zip.
+
+```bash
+# Check the embedded archive and index
+nats-docs doctor
+
+# Search documentation
+nats-docs search "jetstream consumers" --limit 5
+
+# Retrieve a page by document ID or alias
+nats-docs get nats-concepts/jetstream/consumers
+
+# List indexed pages
+nats-docs list
+
+# Machine-readable output for agents and scripts
+nats-docs search "auth callout" --limit 3 --json
+nats-docs get running-a-nats-service/configuration/securing_nats/auth_callout --json
+```
+
+To inspect another downloaded NATS docs zip instead of the embedded snapshot:
+
+```bash
+nats-docs --archive /path/to/nats.docs-master.zip search "leaf nodes"
 ```
 
 ## Configuration
 
-The server can be configured via:
+The MCP server can be configured via:
 1. Command-line flags (highest priority)
 2. Configuration file (YAML)
 3. Environment variables
@@ -193,7 +228,7 @@ If Syncp documentation fetch fails during startup:
 - The default NATS-only behavior is preserved
 - No breaking changes to the MCP tool interface
 
-## Usage
+## MCP Server Usage
 
 ### Running the Server
 
@@ -420,9 +455,12 @@ go run ./scripts/real_world_tests
 
 ### Building
 
-Always use GoReleaser for building:
+Use GoReleaser for release artifacts and direct `go build` when you only need the standalone CLI:
 
 ```bash
+# Single executable CLI
+go build -o nats-docs ./cmd/nats-docs-cli
+
 # Development build
 goreleaser build --snapshot --clean
 
@@ -434,16 +472,21 @@ goreleaser release --snapshot --clean
 
 ```
 .
-├── cmd/server/          # Main entry point
+├── assets/              # Embedded NATS docs archive
+├── cmd/
+│   ├── nats-docs-cli/   # Standalone CLI entry point
+│   └── server/          # MCP server entry point
 ├── internal/
 │   ├── classifier/      # Query classification (NATS/Syncp routing)
 │   ├── config/          # Configuration management
 │   ├── fetcher/         # Documentation fetching (dual-source support)
 │   ├── parser/          # HTML parsing
 │   ├── index/           # Search indexing and management
+│   ├── natsdocs/        # MCP-independent NATS docs archive indexing
 │   ├── search/          # Multi-source search orchestration
 │   ├── logger/          # Structured logging
 │   └── server/          # MCP server core
+├── skill/               # Agent SKILL.md for the standalone CLI
 ├── .github/workflows/   # CI/CD workflows
 └── .goreleaser.yaml     # Build configuration
 ```

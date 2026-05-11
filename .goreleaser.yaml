@@ -6,11 +6,42 @@ version: 2
 before:
   hooks:
     # Run non-fetcher tests before building (fetcher tests are too slow)
-    - go test -v ./internal/config ./internal/index ./internal/logger ./internal/parser ./internal/server
+    - go test -v ./internal/config ./internal/index ./internal/logger ./internal/parser ./internal/natsdocs ./internal/server
     # Ensure dependencies are up to date
     - go mod tidy
 
 builds:
+  - id: nats-docs-cli
+    main: ./cmd/nats-docs-cli
+    binary: nats-docs
+
+    # Build for multiple platforms
+    goos:
+      - linux
+      - darwin
+      - windows
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Static linking - no external dependencies
+    env:
+      - CGO_ENABLED=0
+
+    # Embed version information via ldflags
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+    # Ignore certain OS/arch combinations that don't make sense
+    ignore:
+      - goos: windows
+        goarch: arm64
+
   - id: nats-docs-mcp-server
     main: ./cmd/server
     binary: nats-docs-mcp-server
@@ -46,6 +77,7 @@ builds:
 upx:
   - enabled: true
     ids:
+      - nats-docs-cli
       - nats-docs-mcp-server
     goos:
       - linux
@@ -63,6 +95,7 @@ archives:
       - README.md
       - LICENSE
       - config.example.yaml
+      - skill/SKILL.md
       - assets/nats.docs-master.zip
     
     # Archive name format
@@ -165,6 +198,7 @@ release:
     
     Extract the archive and run:
     ```bash
+    ./nats-docs search "jetstream consumer"
     ./nats-docs-mcp-server --config config.example.yaml
     ```
     
