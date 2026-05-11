@@ -10,25 +10,29 @@ log_level: info
 # Documentation Fetching Configuration
 # Base URL for NATS documentation
 # Default: https://docs.nats.io
-docs_url: https://docs.nats.io
+docs_base_url: https://docs.nats.io
 
 # NATS Documentation Source
-# Default: site
+# Default: archive
 # Use "archive" to load NATS docs from a local nats.docs GitHub zip instead
 # of scraping the rendered site. In this release archive_url is reserved and
 # rejected when source_type is archive.
 nats:
-  source_type: site
-  archive_path: ""
+  source_type: archive
+  archive_path: assets/nats.docs-master.zip
   archive_url: ""
   archive_branch: master
   archive_include_orphans: false
   archive_include_legacy: false
 
+  # To revert to the previous live-site scraper:
+  # source_type: site
+  # archive_path: ""
+
 # Timeout for fetching individual documentation pages
-# Format: duration string (e.g., "30s", "1m", "500ms")
-# Default: 30s
-fetch_timeout: 30s
+# Format: integer (seconds)
+# Default: 30
+fetch_timeout: 30
 
 # Maximum number of retry attempts for failed fetches
 # Default: 3
@@ -41,8 +45,8 @@ retry_backoff: 1s
 
 # Search Configuration
 # Maximum number of search results to return per query
-# Default: 10
-max_search_results: 10
+# Default: 50
+max_search_results: 50
 
 # Caching Configuration
 # Directory where documentation cache is stored
@@ -77,10 +81,10 @@ synadia:
   base_url: https://docs.synadia.com
 
   # Timeout for fetching Synadia documentation pages
-  # Format: duration string (e.g., "30s", "1m", "500ms")
+  # Format: integer (seconds)
   # This is separate from NATS fetch_timeout for independent control
-  # Default: 30s
-  fetch_timeout: 30s
+  # Default: 30
+  fetch_timeout: 30
 
 # GitHub Documentation Support
 # This section enables support for indexing markdown files from NATS GitHub repositories

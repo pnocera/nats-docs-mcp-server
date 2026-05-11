@@ -30,7 +30,7 @@ cd nats-docs-mcp-server_*
 ### Build from Source
 
 Requirements:
-- Go 1.22 or later
+- Go 1.24 or later
 - GoReleaser (for building)
 
 ```bash
@@ -59,12 +59,23 @@ Create a `config.yaml` file (see `config.example.yaml` for a complete example):
 
 ```yaml
 log_level: info
-docs_url: https://docs.nats.io
-fetch_timeout: 30s
-max_retries: 3
-retry_backoff: 1s
-max_search_results: 10
+docs_base_url: https://docs.nats.io
+fetch_timeout: 30
+max_concurrent: 5
+max_search_results: 50
+nats:
+  source_type: archive
+  archive_path: assets/nats.docs-master.zip
+  archive_url: ""
 ```
+
+### NATS Documentation Source
+
+By default the server loads NATS documentation from the local `assets/nats.docs-master.zip` archive. This avoids scraping the rendered GitBook site at startup, supports offline initialization, and still returns public `https://docs.nats.io` URLs in search and retrieve results.
+
+The default `archive_path` is relative to the process working directory. Release archives include `assets/nats.docs-master.zip`, so run the binary from the extracted release directory or set `nats.archive_path` / `NATS_DOCS_NATS_ARCHIVE_PATH` to an absolute path. Container users should mount the archive and set `NATS_DOCS_NATS_ARCHIVE_PATH`, or set `NATS_DOCS_NATS_SOURCE_TYPE=site` to use the live-site fallback.
+
+To revert to the previous live-site loader, set `nats.source_type: site`. `nats.archive_url` is reserved for a future remote-download mode and is rejected when archive mode is enabled; use `nats.archive_path` for this release.
 
 ### Command-line Flags
 
@@ -84,8 +95,10 @@ All configuration options can be set via environment variables with the `NATS_DO
 
 ```bash
 export NATS_DOCS_LOG_LEVEL=debug
-export NATS_DOCS_DOCS_URL=https://docs.nats.io
-export NATS_DOCS_FETCH_TIMEOUT=30s
+export NATS_DOCS_DOCS_BASE_URL=https://docs.nats.io
+export NATS_DOCS_FETCH_TIMEOUT=30
+export NATS_DOCS_NATS_SOURCE_TYPE=archive
+export NATS_DOCS_NATS_ARCHIVE_PATH=assets/nats.docs-master.zip
 ```
 
 ## Caching
@@ -93,7 +106,8 @@ export NATS_DOCS_FETCH_TIMEOUT=30s
 The server caches fetched documentation to enable offline operation and faster startup.
 
 ### Cache Behavior
-- **First run**: Fetches docs from network, creates cache (~5-30 seconds)
+- **First archive run**: Reads the local archive and creates cache without network access
+- **First site run**: Fetches docs from network, creates cache (~5-30 seconds)
 - **Subsequent runs**: Loads from cache if valid, extremely fast (<1 second)
 - **Auto-refresh**: Automatically refreshes if cache is older than 7 days (configurable)
 
@@ -130,7 +144,7 @@ To enable Syncp documentation support, add the following to your `config.yaml`:
 syncp:
   enabled: true
   base_url: https://docs.synadia.com/control-plane
-  fetch_timeout: 30s
+  fetch_timeout: 30
 
 classification:
   syncp_keywords:

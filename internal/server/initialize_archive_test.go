@@ -28,8 +28,22 @@ func TestServer_NATSArchiveSelected(t *testing.T) {
 	}
 }
 
-func TestServer_NATSSiteSelectedByDefault(t *testing.T) {
+func TestServer_NATSArchiveSelectedByDefault(t *testing.T) {
 	cfg := config.NewConfig()
+	cfg.CacheDir = t.TempDir()
+
+	srv, err := NewServer(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	if _, ok := srv.natsLoader.(*natsArchiveLoader); !ok {
+		t.Fatalf("expected natsArchiveLoader, got %T", srv.natsLoader)
+	}
+}
+
+func TestServer_NATSSiteSelectedWhenConfigured(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.NATSSourceType = "site"
 	cfg.CacheDir = t.TempDir()
 
 	srv, err := NewServer(cfg, testLogger())
@@ -133,6 +147,7 @@ func TestInitialize_ModeSwitch_SiteToArchive(t *testing.T) {
 	cacheDir := t.TempDir()
 
 	siteCfg := config.NewConfig()
+	siteCfg.NATSSourceType = "site"
 	siteCfg.CacheDir = cacheDir
 	siteSrv, err := NewServer(siteCfg, testLogger())
 	if err != nil {
@@ -169,6 +184,7 @@ func TestInitialize_ModeSwitch_ArchiveToSite(t *testing.T) {
 	}
 
 	siteCfg := config.NewConfig()
+	siteCfg.NATSSourceType = "site"
 	siteCfg.CacheDir = cacheDir
 	siteSrv, err := NewServer(siteCfg, testLogger())
 	if err != nil {
@@ -198,6 +214,37 @@ func TestInitialize_ArchiveSource_OfflineNoNetwork(t *testing.T) {
 	}, testLogger())
 	if err := srv.Initialize(context.Background()); err != nil {
 		t.Fatalf("Initialize returned error: %v", err)
+	}
+}
+
+func TestInitialize_DefaultArchiveAssetSmoke(t *testing.T) {
+	archivePath := filepath.Join("..", "..", "assets", "nats.docs-master.zip")
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("default archive asset is required for smoke test: %v", err)
+	}
+
+	cfg := config.NewConfig()
+	cfg.CacheDir = t.TempDir()
+	cfg.NATSArchivePath = archivePath
+	srv, err := NewServer(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	if err := srv.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize returned error: %v", err)
+	}
+	if got := srv.NATSIndex().Count(); got < 100 {
+		t.Fatalf("expected default archive to index more than 100 documents, got %d", got)
+	}
+	results, err := srv.NATSIndex().Search("jetstream", 5)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected non-empty jetstream search results")
+	}
+	if _, err := srv.NATSIndex().Get("index"); err != nil {
+		t.Fatalf("expected root document to be retrievable: %v", err)
 	}
 }
 

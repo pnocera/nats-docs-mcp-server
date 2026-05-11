@@ -39,3 +39,5 @@ config.yaml
 # Temporary files
 *.tmp
 *.log
+
+assets/nats.docs-master/

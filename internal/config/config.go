@@ -28,7 +28,7 @@ type Config struct {
 	RefreshCache  bool   // Force refresh cache on startup (default: false)
 
 	// NATS documentation source settings
-	NATSSourceType            string // Source type: site or archive (default: site)
+	NATSSourceType            string // Source type: site or archive (default: archive)
 	NATSArchivePath           string // Local path to nats.docs zip when source type is archive
 	NATSArchiveURL            string // Reserved for future remote archive download
 	NATSArchiveBranch         string // Branch/revision label for archive metadata (default: master)
@@ -78,8 +78,8 @@ func NewConfig() *Config {
 		RefreshCache:  false,
 
 		// NATS source defaults
-		NATSSourceType:            "site",
-		NATSArchivePath:           "",
+		NATSSourceType:            "archive",
+		NATSArchivePath:           "assets/nats.docs-master.zip",
 		NATSArchiveURL:            "",
 		NATSArchiveBranch:         "master",
 		NATSArchiveIncludeOrphans: false,

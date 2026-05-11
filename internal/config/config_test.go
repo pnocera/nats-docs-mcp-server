@@ -33,11 +33,11 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default CacheDir to be empty, got '%s'", cfg.CacheDir)
 	}
 
-	if cfg.NATSSourceType != "site" {
-		t.Errorf("Expected default NATSSourceType to be 'site', got '%s'", cfg.NATSSourceType)
+	if cfg.NATSSourceType != "archive" {
+		t.Errorf("Expected default NATSSourceType to be 'archive', got '%s'", cfg.NATSSourceType)
 	}
-	if cfg.NATSArchivePath != "" {
-		t.Errorf("Expected default NATSArchivePath to be empty, got '%s'", cfg.NATSArchivePath)
+	if cfg.NATSArchivePath != "assets/nats.docs-master.zip" {
+		t.Errorf("Expected default NATSArchivePath to be assets/nats.docs-master.zip, got '%s'", cfg.NATSArchivePath)
 	}
 	if cfg.NATSArchiveURL != "" {
 		t.Errorf("Expected default NATSArchiveURL to be empty, got '%s'", cfg.NATSArchiveURL)
@@ -485,6 +485,27 @@ func TestLoadFromFileInvalidPath(t *testing.T) {
 	}
 }
 
+// TestConfigExampleLoads verifies that the checked-in example config is valid
+// and matches the documented archive defaults.
+func TestConfigExampleLoads(t *testing.T) {
+	cfg, err := LoadFromFile(filepath.Join("..", "..", "config.example.yaml"))
+	if err != nil {
+		t.Fatalf("Expected config.example.yaml to load, got error: %v", err)
+	}
+	if cfg.DocsBaseURL != "https://docs.nats.io" {
+		t.Errorf("Expected DocsBaseURL from config.example.yaml, got %q", cfg.DocsBaseURL)
+	}
+	if cfg.FetchTimeout != 30 {
+		t.Errorf("Expected FetchTimeout 30 from config.example.yaml, got %d", cfg.FetchTimeout)
+	}
+	if cfg.MaxSearchResults != 50 {
+		t.Errorf("Expected MaxSearchResults 50 from config.example.yaml, got %d", cfg.MaxSearchResults)
+	}
+	if cfg.NATSSourceType != "archive" || cfg.NATSArchivePath != "assets/nats.docs-master.zip" {
+		t.Errorf("Expected archive defaults from config.example.yaml, got source=%q path=%q", cfg.NATSSourceType, cfg.NATSArchivePath)
+	}
+}
+
 // TestLoadFromFileEmptyValues verifies that empty values in config file are handled
 func TestLoadFromFileEmptyValues(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -767,11 +788,11 @@ func TestLoadValidatesConfiguration(t *testing.T) {
 
 func TestNewConfig_NATSSourceDefaults(t *testing.T) {
 	cfg := NewConfig()
-	if cfg.NATSSourceType != "site" {
-		t.Fatalf("expected site default, got %q", cfg.NATSSourceType)
+	if cfg.NATSSourceType != "archive" {
+		t.Fatalf("expected archive default, got %q", cfg.NATSSourceType)
 	}
-	if cfg.NATSArchivePath != "" || cfg.NATSArchiveURL != "" {
-		t.Fatalf("expected empty archive path/url, got path=%q url=%q", cfg.NATSArchivePath, cfg.NATSArchiveURL)
+	if cfg.NATSArchivePath != "assets/nats.docs-master.zip" || cfg.NATSArchiveURL != "" {
+		t.Fatalf("expected default archive path and empty url, got path=%q url=%q", cfg.NATSArchivePath, cfg.NATSArchiveURL)
 	}
 	if cfg.NATSArchiveBranch != "master" {
 		t.Fatalf("expected branch master, got %q", cfg.NATSArchiveBranch)
@@ -793,6 +814,7 @@ func TestValidate_InvalidSourceType(t *testing.T) {
 func TestValidate_ArchiveSourceMissingPath(t *testing.T) {
 	cfg := NewConfig()
 	cfg.NATSSourceType = "archive"
+	cfg.NATSArchivePath = ""
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "archive_path") {
 		t.Fatalf("expected missing archive path error, got %v", err)

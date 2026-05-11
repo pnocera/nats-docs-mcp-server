@@ -63,6 +63,7 @@ archives:
       - README.md
       - LICENSE
       - config.example.yaml
+      - assets/nats.docs-master.zip
     
     # Archive name format
     name_template: >-

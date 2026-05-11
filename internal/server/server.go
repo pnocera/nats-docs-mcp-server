@@ -150,6 +150,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 		natsLoader = newNATSArchiveLoader(natsArchiveConfig{
 			ArchivePath:    cfg.NATSArchivePath,
 			DocsBaseURL:    cfg.DocsBaseURL,
+			Revision:       cfg.NATSArchiveBranch,
 			IncludeOrphans: cfg.NATSArchiveIncludeOrphans,
 			IncludeLegacy:  cfg.NATSArchiveIncludeLegacy,
 		}, logger)
@@ -673,6 +674,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	s.logger.Info("Server shutdown complete", "transport", s.transport.Type())
 	return nil
+}
+
+// NATSIndex returns the NATS documentation index for developer tooling. It is
+// not part of the MCP server surface.
+func (s *Server) NATSIndex() *index.DocumentationIndex {
+	return s.indexManager.GetNATSIndex()
 }
 
 // extractContent extracts all text content from a parsed document

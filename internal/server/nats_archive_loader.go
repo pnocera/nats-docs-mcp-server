@@ -19,13 +19,16 @@ type natsArchiveLoader struct {
 	docsBaseURL    string
 	includeOrphans bool
 	includeLegacy  bool
-	limits         fetcher.ArchiveLimits
-	logger         *slog.Logger
+	// revision labels SourceMetadata; callers currently supply NATSArchiveBranch.
+	revision string
+	limits   fetcher.ArchiveLimits
+	logger   *slog.Logger
 }
 
 type natsArchiveConfig struct {
 	ArchivePath    string
 	DocsBaseURL    string
+	Revision       string
 	IncludeOrphans bool
 	IncludeLegacy  bool
 }
@@ -36,6 +39,7 @@ func newNATSArchiveLoader(cfg natsArchiveConfig, logger *slog.Logger) *natsArchi
 		docsBaseURL:    cfg.DocsBaseURL,
 		includeOrphans: cfg.IncludeOrphans,
 		includeLegacy:  cfg.IncludeLegacy,
+		revision:       archiveRevisionOrDefault(cfg.Revision),
 		limits:         fetcher.DefaultArchiveLimits(),
 		logger:         logger,
 	}
@@ -151,6 +155,7 @@ func (l *natsArchiveLoader) Load(ctx context.Context) ([]*index.Document, Source
 	}
 
 	aliases, aliasesDropped := buildArchiveAliases(redirects, indexedIDs, l.logger)
+	addArchiveCompatibilityAliases(aliases, indexedIDs)
 	sort.Strings(documentIDs)
 
 	return docs, SourceMetadata{
@@ -158,11 +163,18 @@ func (l *natsArchiveLoader) Load(ctx context.Context) ([]*index.Document, Source
 		Kind:           "github_archive",
 		SourceURL:      l.docsBaseURL,
 		Origin:         l.archivePath,
-		Revision:       "master",
+		Revision:       l.revision,
 		Aliases:        aliases,
 		AliasesDropped: aliasesDropped,
 		DocumentIDs:    documentIDs,
 	}, nil
+}
+
+func archiveRevisionOrDefault(revision string) string {
+	if revision == "" {
+		return "master"
+	}
+	return revision
 }
 
 func shouldSkipArchivePath(p string, ignore *parser.BookIgnore, includeLegacy bool) bool {
@@ -212,6 +224,106 @@ func buildArchiveAliases(redirects []parser.Redirect, indexedIDs map[string]stru
 		aliases[from] = to
 	}
 	return aliases, dropped
+}
+
+func addArchiveCompatibilityAliases(aliases map[string]string, indexedIDs map[string]struct{}) {
+	for id := range indexedIDs {
+		for _, alias := range archiveCompatibilityAliases(id) {
+			if alias == "" || alias == id {
+				continue
+			}
+			if _, indexed := indexedIDs[alias]; indexed {
+				continue
+			}
+			if _, exists := aliases[alias]; exists {
+				continue
+			}
+			aliases[alias] = id
+		}
+	}
+}
+
+func archiveCompatibilityAliases(id string) []string {
+	aliases := make([]string, 0, 4)
+	add := func(alias string) {
+		aliases = append(aliases, strings.Trim(alias, "/"))
+	}
+	addReplacePrefix := func(oldPrefix, newPrefix string) {
+		if strings.HasPrefix(id, oldPrefix) {
+			add(newPrefix + strings.TrimPrefix(id, oldPrefix))
+		}
+	}
+
+	switch id {
+	case "overview":
+		add("nats-concepts/overview")
+	case "nats-concepts/adaptive_edge_deployment":
+		add("nats-concepts/service_infrastructure/adaptive_edge_deployment")
+	case "nats-concepts/core-nats/publish-subscribe/pubsub_walkthrough":
+		add("nats-concepts/core-nats/pubsub/pubsub_walkthrough")
+	case "nats-concepts/core-nats/queue-groups/queues_walkthrough":
+		add("nats-concepts/core-nats/queue/queues_walkthrough")
+	case "nats-concepts/core-nats/request-reply/reqreply_walkthrough":
+		add("nats-concepts/core-nats/reqreply/reqreply_walkthrough")
+	case "nats-concepts/jetstream/example_configuration":
+		add("nats-concepts/jetstream/consumers/example_configuration")
+	case "nats-concepts/jetstream/object-store/obj_walkthrough":
+		add("nats-concepts/jetstream/obj_store/obj_walkthrough")
+	case "nats-concepts/jetstream/source_and_mirror_example":
+		add("nats-concepts/jetstream/source_and_mirror/source_and_mirror_example")
+	case "reference-protocols":
+		add("reference/reference-protocols")
+	case "using-nats/jetstream/nats_api_reference":
+		add("reference/reference-protocols/nats_api_reference")
+	case "using-nats/developing-with-nats/developer":
+		add("using-nats/developer")
+	case "using-nats/developing-with-nats/anatomy":
+		add("using-nats/developer/anatomy")
+	case "using-nats/developing-with-nats/services":
+		add("using-nats/developer/services")
+	case "using-nats/jetstream/develop_jetstream":
+		add("using-nats/developer/develop_jetstream")
+	case "using-nats/jetstream/model_deep_dive":
+		add("using-nats/developer/develop_jetstream/model_deep_dive")
+	case "running-a-nats-service/installation":
+		add("running-a-nats-service/introduction/installation")
+	case "running-a-nats-service/running":
+		add("running-a-nats-service/introduction/running")
+	case "running-a-nats-service/running/nats_docker":
+		add("running-a-nats-service/nats_docker")
+	case "running-a-nats-service/nats-on-kubernetes/nats-kubernetes":
+		add("running-a-nats-service/nats-kubernetes")
+	case "running-a-nats-service/nats_admin/jwt":
+		add("running-a-nats-service/nats_admin/security/jwt")
+	case "running-a-nats-service/configuration/jetstream-config/resource_management":
+		add("running-a-nats-service/configuration/resource_management")
+	case "running-a-nats-service/configuration/clustering/cluster_tls":
+		add("running-a-nats-service/configuration/securing_nats/auth_intro/tls_mutual_auth/cluster_tls")
+	case "running-a-nats-service/configuration/ocsp":
+		add("running-a-nats-service/configuration/securing_nats/ocsp")
+	}
+
+	addReplacePrefix("release_notes/", "release-notes/")
+	addReplacePrefix("release_notes/", "release-notes/whats_new/")
+	addReplacePrefix("nats-concepts/core-nats/publish-subscribe/", "nats-concepts/core-nats/")
+	addReplacePrefix("nats-concepts/core-nats/queue-groups/", "nats-concepts/core-nats/")
+	addReplacePrefix("nats-concepts/core-nats/request-reply/", "nats-concepts/core-nats/")
+	addReplacePrefix("nats-concepts/jetstream/object-store/", "nats-concepts/jetstream/")
+	addReplacePrefix("reference/nats-protocol/", "reference/reference-protocols/")
+	addReplacePrefix("using-nats/developing-with-nats/connecting/security/", "using-nats/developer/connecting/")
+	addReplacePrefix("using-nats/developing-with-nats/connecting", "using-nats/developer/connecting")
+	addReplacePrefix("using-nats/developing-with-nats/reconnect", "using-nats/developer/connecting/reconnect")
+	addReplacePrefix("using-nats/developing-with-nats/events", "using-nats/developer/connecting/events")
+	addReplacePrefix("using-nats/developing-with-nats/js/", "using-nats/developer/develop_jetstream/")
+	addReplacePrefix("using-nats/developing-with-nats/receiving", "using-nats/developer/receiving")
+	addReplacePrefix("using-nats/developing-with-nats/sending", "using-nats/developer/sending")
+	addReplacePrefix("using-nats/developing-with-nats/tutorials", "using-nats/developer/tutorials")
+	addReplacePrefix("running-a-nats-service/running/nats_docker/", "running-a-nats-service/nats_docker/")
+	addReplacePrefix("running-a-nats-service/running/", "running-a-nats-service/introduction/")
+	addReplacePrefix("running-a-nats-service/configuration/jetstream-config/configuration_mgmt", "running-a-nats-service/configuration/resource_management/configuration_mgmt")
+	addReplacePrefix("running-a-nats-service/configuration/securing_nats/jwt", "running-a-nats-service/configuration/securing_nats/auth_intro/jwt")
+
+	return aliases
 }
 
 func normalizeRedirectAlias(p string) string {
