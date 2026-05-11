@@ -33,6 +33,25 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default CacheDir to be empty, got '%s'", cfg.CacheDir)
 	}
 
+	if cfg.NATSSourceType != "site" {
+		t.Errorf("Expected default NATSSourceType to be 'site', got '%s'", cfg.NATSSourceType)
+	}
+	if cfg.NATSArchivePath != "" {
+		t.Errorf("Expected default NATSArchivePath to be empty, got '%s'", cfg.NATSArchivePath)
+	}
+	if cfg.NATSArchiveURL != "" {
+		t.Errorf("Expected default NATSArchiveURL to be empty, got '%s'", cfg.NATSArchiveURL)
+	}
+	if cfg.NATSArchiveBranch != "master" {
+		t.Errorf("Expected default NATSArchiveBranch to be 'master', got '%s'", cfg.NATSArchiveBranch)
+	}
+	if cfg.NATSArchiveIncludeOrphans {
+		t.Error("Expected default NATSArchiveIncludeOrphans to be false")
+	}
+	if cfg.NATSArchiveIncludeLegacy {
+		t.Error("Expected default NATSArchiveIncludeLegacy to be false")
+	}
+
 	// Test search settings
 	if cfg.MaxSearchResults != 50 {
 		t.Errorf("Expected default MaxSearchResults to be 50, got %d", cfg.MaxSearchResults)
@@ -175,6 +194,11 @@ func TestLoadFromEnvironmentVariables(t *testing.T) {
 	_ = os.Setenv("MAX_CONCURRENT", "10")
 	_ = os.Setenv("CACHE_DIR", "/tmp/test-cache")
 	_ = os.Setenv("MAX_SEARCH_RESULTS", "100")
+	_ = os.Setenv("NATS_SOURCE_TYPE", "archive")
+	_ = os.Setenv("NATS_ARCHIVE_PATH", "assets/nats.docs-master.zip")
+	_ = os.Setenv("NATS_ARCHIVE_BRANCH", "main")
+	_ = os.Setenv("NATS_ARCHIVE_INCLUDE_ORPHANS", "true")
+	_ = os.Setenv("NATS_ARCHIVE_INCLUDE_LEGACY", "1")
 	defer func() {
 		_ = os.Unsetenv("LOG_LEVEL")
 		_ = os.Unsetenv("DOCS_BASE_URL")
@@ -182,6 +206,11 @@ func TestLoadFromEnvironmentVariables(t *testing.T) {
 		_ = os.Unsetenv("MAX_CONCURRENT")
 		_ = os.Unsetenv("CACHE_DIR")
 		_ = os.Unsetenv("MAX_SEARCH_RESULTS")
+		_ = os.Unsetenv("NATS_SOURCE_TYPE")
+		_ = os.Unsetenv("NATS_ARCHIVE_PATH")
+		_ = os.Unsetenv("NATS_ARCHIVE_BRANCH")
+		_ = os.Unsetenv("NATS_ARCHIVE_INCLUDE_ORPHANS")
+		_ = os.Unsetenv("NATS_ARCHIVE_INCLUDE_LEGACY")
 	}()
 
 	cfg, err := Load()
@@ -212,6 +241,15 @@ func TestLoadFromEnvironmentVariables(t *testing.T) {
 	if cfg.MaxSearchResults != 100 {
 		t.Errorf("Expected MaxSearchResults to be 100, got %d", cfg.MaxSearchResults)
 	}
+	if cfg.NATSSourceType != "archive" || cfg.NATSArchivePath != "assets/nats.docs-master.zip" {
+		t.Errorf("Expected archive source config from env, got source=%q path=%q", cfg.NATSSourceType, cfg.NATSArchivePath)
+	}
+	if cfg.NATSArchiveBranch != "main" {
+		t.Errorf("Expected NATSArchiveBranch to be main, got %q", cfg.NATSArchiveBranch)
+	}
+	if !cfg.NATSArchiveIncludeOrphans || !cfg.NATSArchiveIncludeLegacy {
+		t.Error("Expected archive include flags from env to be true")
+	}
 }
 
 // TestLoadFromConfigFile verifies that configuration can be loaded from a YAML file
@@ -226,6 +264,12 @@ fetch_timeout: 45
 max_concurrent: 8
 cache_dir: /tmp/config-cache
 max_search_results: 75
+nats:
+  source_type: archive
+  archive_path: assets/nats.docs-master.zip
+  archive_branch: main
+  archive_include_orphans: true
+  archive_include_legacy: true
 `
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
@@ -258,6 +302,18 @@ max_search_results: 75
 
 	if cfg.MaxSearchResults != 75 {
 		t.Errorf("Expected MaxSearchResults to be 75, got %d", cfg.MaxSearchResults)
+	}
+	if cfg.NATSSourceType != "archive" {
+		t.Errorf("Expected NATSSourceType to be archive, got %q", cfg.NATSSourceType)
+	}
+	if cfg.NATSArchivePath != "assets/nats.docs-master.zip" {
+		t.Errorf("Expected NATSArchivePath from config file, got %q", cfg.NATSArchivePath)
+	}
+	if cfg.NATSArchiveBranch != "main" {
+		t.Errorf("Expected NATSArchiveBranch to be main, got %q", cfg.NATSArchiveBranch)
+	}
+	if !cfg.NATSArchiveIncludeOrphans || !cfg.NATSArchiveIncludeLegacy {
+		t.Error("Expected archive include flags from config file to be true")
 	}
 }
 
@@ -706,6 +762,89 @@ func TestLoadValidatesConfiguration(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Error("Expected Load to return validation error for invalid log level")
+	}
+}
+
+func TestNewConfig_NATSSourceDefaults(t *testing.T) {
+	cfg := NewConfig()
+	if cfg.NATSSourceType != "site" {
+		t.Fatalf("expected site default, got %q", cfg.NATSSourceType)
+	}
+	if cfg.NATSArchivePath != "" || cfg.NATSArchiveURL != "" {
+		t.Fatalf("expected empty archive path/url, got path=%q url=%q", cfg.NATSArchivePath, cfg.NATSArchiveURL)
+	}
+	if cfg.NATSArchiveBranch != "master" {
+		t.Fatalf("expected branch master, got %q", cfg.NATSArchiveBranch)
+	}
+	if cfg.NATSArchiveIncludeOrphans || cfg.NATSArchiveIncludeLegacy {
+		t.Fatal("expected archive include flags false by default")
+	}
+}
+
+func TestValidate_InvalidSourceType(t *testing.T) {
+	cfg := NewConfig()
+	cfg.NATSSourceType = "foo"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "invalid nats.source_type") {
+		t.Fatalf("expected invalid source type error, got %v", err)
+	}
+}
+
+func TestValidate_ArchiveSourceMissingPath(t *testing.T) {
+	cfg := NewConfig()
+	cfg.NATSSourceType = "archive"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "archive_path") {
+		t.Fatalf("expected missing archive path error, got %v", err)
+	}
+}
+
+func TestValidate_ArchiveSourceRejectsURL(t *testing.T) {
+	cfg := NewConfig()
+	cfg.NATSSourceType = "archive"
+	cfg.NATSArchivePath = "assets/nats.docs-master.zip"
+	cfg.NATSArchiveURL = "https://example.com/archive.zip"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected reserved archive URL error, got %v", err)
+	}
+}
+
+func TestValidate_ArchiveSourcePathOnly(t *testing.T) {
+	cfg := NewConfig()
+	cfg.NATSSourceType = "archive"
+	cfg.NATSArchivePath = "assets/nats.docs-master.zip"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected archive path-only config to validate, got %v", err)
+	}
+}
+
+func TestValidate_SiteSourceIgnoresArchiveFields(t *testing.T) {
+	cfg := NewConfig()
+	cfg.NATSSourceType = "site"
+	cfg.NATSArchiveURL = "https://example.com/archive.zip"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected site config to ignore archive URL, got %v", err)
+	}
+}
+
+func TestLoadWithFlags_NATSArchiveFlags(t *testing.T) {
+	flags := map[string]interface{}{
+		"nats_source_type":             "archive",
+		"nats_archive_path":            "assets/nats.docs-master.zip",
+		"nats_archive_branch":          "main",
+		"nats_archive_include_orphans": true,
+		"nats_archive_include_legacy":  true,
+	}
+	cfg, err := LoadWithFlags("", flags)
+	if err != nil {
+		t.Fatalf("LoadWithFlags returned error: %v", err)
+	}
+	if cfg.NATSSourceType != "archive" || cfg.NATSArchivePath != "assets/nats.docs-master.zip" {
+		t.Fatalf("unexpected archive flag config: %+v", cfg)
+	}
+	if cfg.NATSArchiveBranch != "main" || !cfg.NATSArchiveIncludeOrphans || !cfg.NATSArchiveIncludeLegacy {
+		t.Fatalf("archive flag details not loaded: %+v", cfg)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 
 const (
 	// cacheVersion is the current cache format version
-	cacheVersion = "1.0"
+	cacheVersion = "1.1"
 	// cacheDirPermissions is the permissions for the cache directory
 	cacheDirPermissions = 0755
 	// cacheFilePermissions is the permissions for cache files
@@ -25,9 +25,23 @@ type CachedDocuments struct {
 	Version       string            `json:"version"`
 	Source        string            `json:"source"`
 	SourceURL     string            `json:"source_url"`
+	Kind          string            `json:"kind,omitempty"`
+	Origin        string            `json:"origin,omitempty"`
+	Revision      string            `json:"revision,omitempty"`
 	CachedAt      time.Time         `json:"cached_at"`
 	DocumentCount int               `json:"document_count"`
 	Documents     []*index.Document `json:"documents"`
+	Aliases       map[string]string `json:"aliases,omitempty"`
+}
+
+// SaveParams bundles optional metadata for cache v1.1.
+type SaveParams struct {
+	SourceURL string
+	Kind      string
+	Origin    string
+	Revision  string
+	Documents []*index.Document
+	Aliases   map[string]string
 }
 
 // Cache handles reading/writing documentation cache to disk
@@ -66,6 +80,14 @@ func (c *Cache) getCachePath(source string) string {
 
 // Save persists documentation to cache with atomic writes
 func (c *Cache) Save(source string, sourceURL string, docs []*index.Document) error {
+	return c.SaveWithMetadata(source, SaveParams{
+		SourceURL: sourceURL,
+		Documents: docs,
+	})
+}
+
+// SaveWithMetadata persists documentation to cache with source metadata.
+func (c *Cache) SaveWithMetadata(source string, params SaveParams) error {
 	if source == "" {
 		return fmt.Errorf("source cannot be empty")
 	}
@@ -74,10 +96,14 @@ func (c *Cache) Save(source string, sourceURL string, docs []*index.Document) er
 	cached := &CachedDocuments{
 		Version:       cacheVersion,
 		Source:        source,
-		SourceURL:     sourceURL,
+		SourceURL:     params.SourceURL,
+		Kind:          params.Kind,
+		Origin:        params.Origin,
+		Revision:      params.Revision,
 		CachedAt:      time.Now(),
-		DocumentCount: len(docs),
-		Documents:     docs,
+		DocumentCount: len(params.Documents),
+		Documents:     params.Documents,
+		Aliases:       copyAliases(params.Aliases),
 	}
 
 	// Marshal to JSON with indentation
@@ -115,7 +141,7 @@ func (c *Cache) Save(source string, sourceURL string, docs []*index.Document) er
 		return fmt.Errorf("failed to rename temp cache file: %w", err)
 	}
 
-	c.logger.Debug("Cache saved", "source", source, "path", cachePath, "documents", len(docs))
+	c.logger.Debug("Cache saved", "source", source, "path", cachePath, "documents", len(params.Documents))
 	return nil
 }
 
@@ -228,8 +254,9 @@ func validateCachedDocuments(cached *CachedDocuments) error {
 		return fmt.Errorf("cached documents is nil")
 	}
 
-	// Check version compatibility (could support migration in future)
-	if cached.Version != cacheVersion {
+	// Check version compatibility. v1.0 caches lack kind/origin/aliases but
+	// still unmarshal into this struct and remain safe to import.
+	if cached.Version != cacheVersion && cached.Version != "1.0" {
 		return fmt.Errorf("cache version mismatch: got %s, expected %s", cached.Version, cacheVersion)
 	}
 
@@ -249,4 +276,15 @@ func validateCachedDocuments(cached *CachedDocuments) error {
 	}
 
 	return nil
+}
+
+func copyAliases(aliases map[string]string) map[string]string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(aliases))
+	for alias, canonical := range aliases {
+		copied[alias] = canonical
+	}
+	return copied
 }

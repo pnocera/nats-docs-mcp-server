@@ -12,6 +12,19 @@ log_level: info
 # Default: https://docs.nats.io
 docs_url: https://docs.nats.io
 
+# NATS Documentation Source
+# Default: site
+# Use "archive" to load NATS docs from a local nats.docs GitHub zip instead
+# of scraping the rendered site. In this release archive_url is reserved and
+# rejected when source_type is archive.
+nats:
+  source_type: site
+  archive_path: ""
+  archive_url: ""
+  archive_branch: master
+  archive_include_orphans: false
+  archive_include_legacy: false
+
 # Timeout for fetching individual documentation pages
 # Format: duration string (e.g., "30s", "1m", "500ms")
 # Default: 30s

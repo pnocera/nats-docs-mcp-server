@@ -293,6 +293,53 @@ func TestRetrieveToolHandler(t *testing.T) {
 	}
 }
 
+func TestRetrieveToolHandlerWithAlias(t *testing.T) {
+	cfg := config.NewConfig()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	srv, err := NewServer(cfg, logger)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+	srv.initialized = true
+
+	testDoc := &index.Document{
+		ID:      "overview",
+		Title:   "NATS Overview",
+		URL:     "https://docs.nats.io/overview",
+		Content: "NATS overview content",
+		Sections: []index.Section{
+			{Heading: "Introduction", Content: "NATS overview content", Level: 1},
+		},
+	}
+	if err := srv.indexManager.IndexNATS([]*index.Document{testDoc}); err != nil {
+		t.Fatalf("failed to index document: %v", err)
+	}
+	srv.indexManager.GetNATSIndex().SetAliases(map[string]string{"overview-old": "overview"})
+
+	request := mcp.CallToolRequest{}
+	request.Params.Arguments = map[string]interface{}{"doc_id": "overview-old"}
+	result, err := srv.handleRetrieveTool(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error from handler: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	if result.IsError {
+		t.Fatalf("expected alias retrieval to succeed, got error result: %+v", result)
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("expected text content")
+	}
+	text, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if !strings.Contains(text.Text, "NATS Overview") {
+		t.Fatalf("expected retrieved document title, got %q", text.Text)
+	}
+}
+
 // TestToolHandlerConcurrency tests that tool handlers can be called concurrently
 func TestToolHandlerConcurrency(t *testing.T) {
 	cfg := config.NewConfig()

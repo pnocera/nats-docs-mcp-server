@@ -25,8 +25,9 @@ import (
 // normalizePath removes leading and trailing slashes from a path.
 // This ensures consistent document ID lookups regardless of slash usage.
 // Examples: "/nats-concepts/jetstream" -> "nats-concepts/jetstream"
-//           "nats-concepts/jetstream/" -> "nats-concepts/jetstream"
-//           "/" -> ""
+//
+//	"nats-concepts/jetstream/" -> "nats-concepts/jetstream"
+//	"/" -> ""
 func normalizePath(p string) string {
 	p = strings.TrimLeft(p, "/")
 	p = strings.TrimRight(p, "/")
@@ -41,14 +42,15 @@ func normalizePath(p string) string {
 // Supports dual documentation sources (NATS and Synadia) with classification-based routing.
 type Server struct {
 	config       *config.Config
-	indexManager *index.Manager           // Dual-index manager for NATS and Synadia
-	orchestrator *search.Orchestrator     // Search orchestrator for multi-source search
-	classifier   classifier.Classifier    // Query classifier for routing
+	indexManager *index.Manager        // Dual-index manager for NATS and Synadia
+	orchestrator *search.Orchestrator  // Search orchestrator for multi-source search
+	classifier   classifier.Classifier // Query classifier for routing
 	logger       *slog.Logger
 	mcpServer    *server.MCPServer
 	multiFetcher *fetcher.MultiSourceFetcher // Fetcher for both NATS and Synadia
+	natsLoader   DocumentationLoader
 	transport    TransportStarter
-	cache        *cache.Cache  // Cache for persisting documentation
+	cache        *cache.Cache // Cache for persisting documentation
 	initialized  bool
 }
 
@@ -142,6 +144,23 @@ func NewServer(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 
 	multiFetcher := fetcher.NewMultiSourceFetcher(natsConfig, syadiaConfig, githubConfig, zerologLogger)
 
+	var natsLoader DocumentationLoader
+	switch cfg.NATSSourceType {
+	case "archive":
+		natsLoader = newNATSArchiveLoader(natsArchiveConfig{
+			ArchivePath:    cfg.NATSArchivePath,
+			DocsBaseURL:    cfg.DocsBaseURL,
+			IncludeOrphans: cfg.NATSArchiveIncludeOrphans,
+			IncludeLegacy:  cfg.NATSArchiveIncludeLegacy,
+		}, logger)
+	default:
+		natsLoader = &natsSiteLoader{
+			fetcher:     multiFetcher,
+			docsBaseURL: cfg.DocsBaseURL,
+			logger:      logger,
+		}
+	}
+
 	// Create transport based on configuration
 	transport, err := NewTransport(cfg, logger)
 	if err != nil {
@@ -164,6 +183,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 		logger:       logger,
 		mcpServer:    mcpServer,
 		multiFetcher: multiFetcher,
+		natsLoader:   natsLoader,
 		transport:    transport,
 		cache:        cacheInstance,
 		initialized:  false,
@@ -219,7 +239,14 @@ func (s *Server) Initialize(ctx context.Context) error {
 
 // initializeNATS initializes NATS documentation, using cache if available and valid.
 func (s *Server) initializeNATS(ctx context.Context) error {
-	source := "nats"
+	source := natsCacheSourceForType(s.config.NATSSourceType)
+	expectedKind := kindForSourceType(s.config.NATSSourceType)
+
+	if s.config.RefreshCache && s.cache != nil {
+		if err := s.cache.Clear(otherNATSCacheSource(s.config.NATSSourceType)); err != nil {
+			s.logger.Warn("Failed to clear stale NATS cache", "error", err)
+		}
+	}
 
 	// Check if we should use cache
 	if !s.config.RefreshCache && s.cache != nil {
@@ -227,76 +254,99 @@ func (s *Server) initializeNATS(ctx context.Context) error {
 		valid, err := s.cache.IsValid(source, maxAge)
 
 		if err != nil {
-			s.logger.Warn("Cache validation failed, will fetch from network",
+			s.logger.Warn("Cache validation failed, will reload",
 				"source", source, "error", err)
 		} else if valid {
 			// Load from cache
 			s.logger.Info("Loading NATS docs from cache", "source", source)
 			cached, err := s.cache.Load(source)
-			if err == nil && len(cached.Documents) > 0 {
-				// Import documents into index
-				if err := s.indexManager.GetNATSIndex().ImportDocuments(cached.Documents); err == nil {
+			switch {
+			case err != nil:
+				s.logger.Warn("Cache load failed, will reload", "source", source, "error", err)
+			case len(cached.Documents) == 0:
+				s.logger.Info("Empty cache, will reload", "source", source)
+			case cached.Kind != "" && cached.Kind != expectedKind:
+				s.logger.Info("Cache kind mismatch, will reload",
+					"source", source, "cached_kind", cached.Kind, "expected_kind", expectedKind)
+			default:
+				if err := s.indexManager.GetNATSIndex().ImportDocuments(cached.Documents); err != nil {
+					s.logger.Warn("Failed to import cached docs, will reload", "error", err)
+				} else {
+					s.indexManager.GetNATSIndex().SetAliases(cached.Aliases)
 					s.logger.Info("Loaded NATS docs from cache",
+						"source", source,
 						"count", len(cached.Documents),
+						"aliases", len(cached.Aliases),
 						"cached_at", cached.CachedAt)
 					return nil
 				}
-				s.logger.Warn("Failed to import cached docs, will fetch", "error", err)
 			}
 		}
 	}
 
-	// Cache miss or refresh requested - fetch from network
-	s.logger.Info("Fetching NATS documentation from network",
-		"base_url", s.config.DocsBaseURL)
+	s.logger.Info("Loading NATS documentation",
+		"source_type", s.config.NATSSourceType)
 
-	natsPages, err := s.multiFetcher.FetchNATS(ctx)
+	docs, meta, err := s.natsLoader.Load(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch NATS documentation: %w", err)
+		return fmt.Errorf("failed to load NATS documentation: %w", err)
 	}
 
-	s.logger.Info("Fetched NATS documentation pages", "count", len(natsPages))
-
-	// Parse and index documents
-	natsIndexDocs := make([]*index.Document, 0)
-	for _, page := range natsPages {
-		doc, err := parser.ParseHTML(strings.NewReader(string(page.Content)))
-		if err != nil {
-			s.logger.Warn("Failed to parse NATS page", "path", page.Path, "error", err)
-			continue
-		}
-
-		indexDoc := &index.Document{
-			ID:          normalizePath(page.Path),
-			Title:       doc.Title,
-			URL:         s.config.DocsBaseURL + page.Path,
-			Content:     extractContent(doc),
-			Sections:    convertSections(doc.Sections),
-			LastUpdated: time.Now(),
-		}
-		natsIndexDocs = append(natsIndexDocs, indexDoc)
+	if len(docs) == 0 {
+		return fmt.Errorf("NATS loader returned zero documents")
 	}
 
-	if len(natsIndexDocs) == 0 {
-		return fmt.Errorf("failed to parse any NATS documentation pages")
-	}
-
-	if err := s.indexManager.IndexNATS(natsIndexDocs); err != nil {
+	if err := s.indexManager.IndexNATS(docs); err != nil {
 		return fmt.Errorf("failed to index NATS documentation: %w", err)
 	}
+	s.indexManager.GetNATSIndex().SetAliases(meta.Aliases)
 
-	s.logger.Info("NATS documentation indexed", "count", len(natsIndexDocs))
+	s.logger.Info("NATS documentation indexed",
+		"count", len(docs),
+		"kind", meta.Kind,
+		"origin", meta.Origin,
+		"revision", meta.Revision,
+		"aliases", len(meta.Aliases),
+		"aliases_dropped", meta.AliasesDropped)
 
 	// Save to cache (best-effort, log errors but don't fail)
 	if s.cache != nil {
-		if err := s.cache.Save(source, s.config.DocsBaseURL, natsIndexDocs); err != nil {
+		if err := s.cache.SaveWithMetadata(source, cache.SaveParams{
+			SourceURL: meta.SourceURL,
+			Kind:      meta.Kind,
+			Origin:    meta.Origin,
+			Revision:  meta.Revision,
+			Documents: docs,
+			Aliases:   meta.Aliases,
+		}); err != nil {
 			s.logger.Warn("Failed to save cache", "source", source, "error", err)
 		} else {
-			s.logger.Info("Saved NATS docs to cache", "count", len(natsIndexDocs))
+			s.logger.Info("Saved NATS docs to cache", "source", source, "count", len(docs))
 		}
 	}
 
 	return nil
+}
+
+func natsCacheSourceForType(sourceType string) string {
+	if sourceType == "archive" {
+		return "nats-archive"
+	}
+	return "nats-site"
+}
+
+func otherNATSCacheSource(sourceType string) string {
+	if sourceType == "archive" {
+		return "nats-site"
+	}
+	return "nats-archive"
+}
+
+func kindForSourceType(sourceType string) string {
+	if sourceType == "archive" {
+		return "github_archive"
+	}
+	return "site_html"
 }
 
 // initializeSynadia initializes Synadia documentation, using cache if available and valid.

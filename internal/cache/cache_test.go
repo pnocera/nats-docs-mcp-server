@@ -70,9 +70,9 @@ func TestCacheSaveAndLoad(t *testing.T) {
 	// Create test documents
 	docs := []*index.Document{
 		{
-			ID:    "test1",
-			Title: "Test Document 1",
-			URL:   "https://example.com/test1",
+			ID:      "test1",
+			Title:   "Test Document 1",
+			URL:     "https://example.com/test1",
 			Content: "This is test content",
 			Sections: []index.Section{
 				{
@@ -150,6 +150,71 @@ func TestCacheSaveEmptySource(t *testing.T) {
 	err := c.Save("", "https://example.com", []*index.Document{})
 	if err == nil {
 		t.Fatal("Expected error for empty source")
+	}
+}
+
+func TestCacheSaveWithMetadataRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	c, _ := NewCache(tmpDir, logger)
+
+	docs := []*index.Document{{ID: "overview", Title: "Overview", URL: "https://docs.nats.io/overview", Content: "content"}}
+	aliases := map[string]string{"overview-old": "overview"}
+	err := c.SaveWithMetadata("nats-archive", SaveParams{
+		SourceURL: "https://docs.nats.io",
+		Kind:      "github_archive",
+		Origin:    "assets/nats.docs-master.zip",
+		Revision:  "master",
+		Documents: docs,
+		Aliases:   aliases,
+	})
+	if err != nil {
+		t.Fatalf("SaveWithMetadata failed: %v", err)
+	}
+
+	aliases["overview-old"] = "mutated"
+	cached, err := c.Load("nats-archive")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cached.Version != cacheVersion {
+		t.Fatalf("expected cache version %s, got %s", cacheVersion, cached.Version)
+	}
+	if cached.Kind != "github_archive" || cached.Origin != "assets/nats.docs-master.zip" || cached.Revision != "master" {
+		t.Fatalf("metadata did not round-trip: %+v", cached)
+	}
+	if got := cached.Aliases["overview-old"]; got != "overview" {
+		t.Fatalf("expected copied alias overview, got %q", got)
+	}
+}
+
+func TestCacheLoadV10Compatibility(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	c, _ := NewCache(tmpDir, logger)
+
+	cached := &CachedDocuments{
+		Version:       "1.0",
+		Source:        "nats",
+		SourceURL:     "https://docs.nats.io",
+		CachedAt:      time.Now(),
+		DocumentCount: 1,
+		Documents:     []*index.Document{{ID: "index", Title: "Welcome"}},
+	}
+	data, err := marshalForTesting(cached)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if err := os.WriteFile(c.getCachePath("nats"), data, 0644); err != nil {
+		t.Fatalf("write v1.0 cache failed: %v", err)
+	}
+
+	loaded, err := c.Load("nats")
+	if err != nil {
+		t.Fatalf("expected v1.0 cache to load, got %v", err)
+	}
+	if loaded.Kind != "" || len(loaded.Aliases) != 0 {
+		t.Fatalf("expected missing v1.1 metadata to be zero-valued, got %+v", loaded)
 	}
 }
 

@@ -20,12 +20,20 @@ type Config struct {
 	LogLevel string // Log level: debug, info, warn, error (default: info)
 
 	// Documentation settings
-	DocsBaseURL    string // Base URL for NATS documentation (default: https://docs.nats.io)
-	FetchTimeout   int    // Timeout for fetching documentation in seconds (default: 30)
-	MaxConcurrent  int    // Maximum concurrent fetches (default: 5)
-	CacheDir       string // Directory for caching fetched documentation (default: ~/.cache/nats-mcp)
-	CacheMaxAge    int    // Maximum age of cache in days before auto-refresh (default: 7)
-	RefreshCache   bool   // Force refresh cache on startup (default: false)
+	DocsBaseURL   string // Base URL for NATS documentation (default: https://docs.nats.io)
+	FetchTimeout  int    // Timeout for fetching documentation in seconds (default: 30)
+	MaxConcurrent int    // Maximum concurrent fetches (default: 5)
+	CacheDir      string // Directory for caching fetched documentation (default: ~/.cache/nats-mcp)
+	CacheMaxAge   int    // Maximum age of cache in days before auto-refresh (default: 7)
+	RefreshCache  bool   // Force refresh cache on startup (default: false)
+
+	// NATS documentation source settings
+	NATSSourceType            string // Source type: site or archive (default: site)
+	NATSArchivePath           string // Local path to nats.docs zip when source type is archive
+	NATSArchiveURL            string // Reserved for future remote archive download
+	NATSArchiveBranch         string // Branch/revision label for archive metadata (default: master)
+	NATSArchiveIncludeOrphans bool   // Include Markdown files not linked from SUMMARY.md
+	NATSArchiveIncludeLegacy  bool   // Include legacy/ Markdown targets
 
 	// Search settings
 	MaxSearchResults int // Maximum number of search results to return (default: 50)
@@ -36,9 +44,9 @@ type Config struct {
 	Port          int    // Port to bind for network transports (default: 0)
 
 	// Synadia documentation settings
-	SynadiaEnabled      bool     // Enable Synadia documentation support (default: false)
-	SynadiaBaseURL      string   // Base URL for Synadia documentation (default: https://docs.synadia.com)
-	SynadiaFetchTimeout int      // Timeout for fetching Synadia documentation in seconds (default: 30)
+	SynadiaEnabled      bool   // Enable Synadia documentation support (default: false)
+	SynadiaBaseURL      string // Base URL for Synadia documentation (default: https://docs.synadia.com)
+	SynadiaFetchTimeout int    // Timeout for fetching Synadia documentation in seconds (default: 30)
 
 	// GitHub documentation settings
 	GitHubEnabled      bool     // Enable GitHub documentation support (default: false)
@@ -49,8 +57,8 @@ type Config struct {
 
 	// Classification keywords
 	SynadiaKeywords []string // Keywords that classify queries as Synadia-specific
-	NATSKeywords  []string // Keywords that classify queries as NATS-specific
-	GitHubKeywords []string // Keywords that classify queries as GitHub-specific
+	NATSKeywords    []string // Keywords that classify queries as NATS-specific
+	GitHubKeywords  []string // Keywords that classify queries as GitHub-specific
 }
 
 // NewConfig creates a new Config with default values for all optional parameters.
@@ -69,6 +77,14 @@ func NewConfig() *Config {
 		CacheMaxAge:   7,
 		RefreshCache:  false,
 
+		// NATS source defaults
+		NATSSourceType:            "site",
+		NATSArchivePath:           "",
+		NATSArchiveURL:            "",
+		NATSArchiveBranch:         "master",
+		NATSArchiveIncludeOrphans: false,
+		NATSArchiveIncludeLegacy:  false,
+
 		// Search defaults
 		MaxSearchResults: 50,
 
@@ -84,7 +100,7 @@ func NewConfig() *Config {
 
 		// GitHub defaults
 		GitHubEnabled: false, // Disabled by default
-		GitHubToken:  "",
+		GitHubToken:   "",
 		GitHubRepositories: []string{
 			"nats-io/nats-server",
 			"nats-io/nats.docs",
@@ -94,9 +110,9 @@ func NewConfig() *Config {
 		GitHubFetchTimeout: 30,
 
 		// Classification keyword defaults
-		SynadiaKeywords:  classifier.DefaultSyadiaKeywords(),
-		NATSKeywords:   classifier.DefaultNATSKeywords(),
-		GitHubKeywords: classifier.DefaultGitHubKeywords(),
+		SynadiaKeywords: classifier.DefaultSyadiaKeywords(),
+		NATSKeywords:    classifier.DefaultNATSKeywords(),
+		GitHubKeywords:  classifier.DefaultGitHubKeywords(),
 	}
 }
 
@@ -154,6 +170,7 @@ func LoadFromFile(configPath string) (*Config, error) {
 	if v.IsSet("max_search_results") {
 		cfg.MaxSearchResults = v.GetInt("max_search_results")
 	}
+	loadNATSArchiveFromViper(cfg, v)
 	// Transport settings
 	if v.IsSet("transport_type") {
 		cfg.TransportType = v.GetString("transport_type")
@@ -247,6 +264,7 @@ func LoadWithFlags(configPath string, flags map[string]interface{}) (*Config, er
 		if v.IsSet("max_search_results") {
 			cfg.MaxSearchResults = v.GetInt("max_search_results")
 		}
+		loadNATSArchiveFromViper(cfg, v)
 		// Transport settings
 		if v.IsSet("transport_type") {
 			cfg.TransportType = v.GetString("transport_type")
@@ -304,6 +322,36 @@ func LoadWithFlags(configPath string, flags map[string]interface{}) (*Config, er
 	if val, ok := flags["max_search_results"]; ok && val != nil {
 		if intVal, ok := val.(int); ok {
 			cfg.MaxSearchResults = intVal
+		}
+	}
+	if val, ok := flags["nats_source_type"]; ok && val != nil {
+		if strVal, ok := val.(string); ok {
+			cfg.NATSSourceType = strVal
+		}
+	}
+	if val, ok := flags["nats_archive_path"]; ok && val != nil {
+		if strVal, ok := val.(string); ok {
+			cfg.NATSArchivePath = strVal
+		}
+	}
+	if val, ok := flags["nats_archive_url"]; ok && val != nil {
+		if strVal, ok := val.(string); ok {
+			cfg.NATSArchiveURL = strVal
+		}
+	}
+	if val, ok := flags["nats_archive_branch"]; ok && val != nil {
+		if strVal, ok := val.(string); ok {
+			cfg.NATSArchiveBranch = strVal
+		}
+	}
+	if val, ok := flags["nats_archive_include_orphans"]; ok && val != nil {
+		if boolVal, ok := val.(bool); ok {
+			cfg.NATSArchiveIncludeOrphans = boolVal
+		}
+	}
+	if val, ok := flags["nats_archive_include_legacy"]; ok && val != nil {
+		if boolVal, ok := val.(bool); ok {
+			cfg.NATSArchiveIncludeLegacy = boolVal
 		}
 	}
 	// Transport settings
@@ -393,6 +441,24 @@ func loadFromEnv(cfg *Config) {
 		if intVal, err := strconv.Atoi(val); err == nil {
 			cfg.MaxSearchResults = intVal
 		}
+	}
+	if val := getEnv("NATS_SOURCE_TYPE"); val != "" {
+		cfg.NATSSourceType = val
+	}
+	if val := getEnv("NATS_ARCHIVE_PATH"); val != "" {
+		cfg.NATSArchivePath = val
+	}
+	if val := getEnv("NATS_ARCHIVE_URL"); val != "" {
+		cfg.NATSArchiveURL = val
+	}
+	if val := getEnv("NATS_ARCHIVE_BRANCH"); val != "" {
+		cfg.NATSArchiveBranch = val
+	}
+	if val := getEnv("NATS_ARCHIVE_INCLUDE_ORPHANS"); val != "" {
+		cfg.NATSArchiveIncludeOrphans = parseBoolEnv(val)
+	}
+	if val := getEnv("NATS_ARCHIVE_INCLUDE_LEGACY"); val != "" {
+		cfg.NATSArchiveIncludeLegacy = parseBoolEnv(val)
 	}
 
 	// Transport settings
@@ -568,6 +634,19 @@ func (c *Config) Validate() error {
 		errors = append(errors, fmt.Sprintf("max_search_results must be positive, got: %d", c.MaxSearchResults))
 	}
 
+	switch c.NATSSourceType {
+	case "site":
+	case "archive":
+		if c.NATSArchivePath == "" {
+			errors = append(errors, "nats.archive_path cannot be empty when nats.source_type is archive")
+		}
+		if c.NATSArchiveURL != "" {
+			errors = append(errors, "nats_archive_url is reserved and not supported in this release; remove the field or set nats_source_type=site")
+		}
+	default:
+		errors = append(errors, fmt.Sprintf("invalid nats.source_type: %s (must be one of: site, archive)", c.NATSSourceType))
+	}
+
 	// Validate docs base URL
 	if c.DocsBaseURL == "" {
 		errors = append(errors, "docs_base_url cannot be empty")
@@ -657,6 +736,36 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func loadNATSArchiveFromViper(cfg *Config, v *viper.Viper) {
+	if v.IsSet("nats.source_type") {
+		cfg.NATSSourceType = v.GetString("nats.source_type")
+	}
+	if v.IsSet("nats.archive_path") {
+		cfg.NATSArchivePath = v.GetString("nats.archive_path")
+	}
+	if v.IsSet("nats.archive_url") {
+		cfg.NATSArchiveURL = v.GetString("nats.archive_url")
+	}
+	if v.IsSet("nats.archive_branch") {
+		cfg.NATSArchiveBranch = v.GetString("nats.archive_branch")
+	}
+	if v.IsSet("nats.archive_include_orphans") {
+		cfg.NATSArchiveIncludeOrphans = v.GetBool("nats.archive_include_orphans")
+	}
+	if v.IsSet("nats.archive_include_legacy") {
+		cfg.NATSArchiveIncludeLegacy = v.GetBool("nats.archive_include_legacy")
+	}
+}
+
+func parseBoolEnv(val string) bool {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "true", "1", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetCacheDir returns the cache directory, using default if not configured.
