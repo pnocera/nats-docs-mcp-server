@@ -14,11 +14,11 @@ import (
 
 // Document represents a single documentation page with all its content and metadata.
 type Document struct {
-	ID          string    `json:"id"`            // Unique identifier (typically URL path)
-	Title       string    `json:"title"`         // Document title
-	URL         string    `json:"url"`           // Full URL to the documentation page
-	Content     string    `json:"content"`       // Full text content
-	Sections    []Section `json:"sections"`      // Subsections within the document
+	ID          string    `json:"id"`           // Unique identifier (typically URL path)
+	Title       string    `json:"title"`        // Document title
+	URL         string    `json:"url"`          // Full URL to the documentation page
+	Content     string    `json:"content"`      // Full text content
+	Sections    []Section `json:"sections"`     // Subsections within the document
 	LastUpdated time.Time `json:"last_updated"` // When the document was last fetched/updated
 }
 
@@ -293,6 +293,7 @@ type SearchResult struct {
 type DocumentationIndex struct {
 	store       *DocumentStore
 	searchIndex *SearchIndex
+	aliases     map[string]string
 	mu          sync.RWMutex
 }
 
@@ -301,6 +302,7 @@ func NewDocumentationIndex() *DocumentationIndex {
 	return &DocumentationIndex{
 		store:       NewDocumentStore(),
 		searchIndex: NewSearchIndex(),
+		aliases:     make(map[string]string),
 	}
 }
 
@@ -343,7 +345,27 @@ func (di *DocumentationIndex) Get(id string) (*Document, error) {
 	di.mu.RLock()
 	defer di.mu.RUnlock()
 
-	return di.store.GetDocument(id)
+	if doc, err := di.store.GetDocument(id); err == nil {
+		return doc, nil
+	}
+
+	canonical, ok := di.aliases[id]
+	if !ok {
+		return nil, fmt.Errorf("document not found: %s", id)
+	}
+	return di.store.GetDocument(canonical)
+}
+
+// SetAliases replaces the alias table used by Get.
+func (di *DocumentationIndex) SetAliases(aliases map[string]string) {
+	di.mu.Lock()
+	defer di.mu.Unlock()
+
+	next := make(map[string]string, len(aliases))
+	for alias, canonical := range aliases {
+		next[alias] = canonical
+	}
+	di.aliases = next
 }
 
 // Search performs a full-text search and returns ranked results.

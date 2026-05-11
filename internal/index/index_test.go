@@ -732,3 +732,80 @@ func TestDocumentationIndexNoMatchingDocuments(t *testing.T) {
 		t.Errorf("Expected no results for non-matching query, got %d", len(results))
 	}
 }
+
+func TestIndex_GetWithAlias(t *testing.T) {
+	idx := NewDocumentationIndex()
+	doc := &Document{ID: "new", Title: "New", Content: "content"}
+	if err := idx.Index(doc); err != nil {
+		t.Fatalf("Index returned error: %v", err)
+	}
+	idx.SetAliases(map[string]string{"old": "new"})
+
+	got, err := idx.Get("old")
+	if err != nil {
+		t.Fatalf("Get alias returned error: %v", err)
+	}
+	if got.ID != "new" {
+		t.Fatalf("expected canonical doc new, got %q", got.ID)
+	}
+}
+
+func TestIndex_GetAliasMissingTarget(t *testing.T) {
+	idx := NewDocumentationIndex()
+	idx.SetAliases(map[string]string{"old": "missing"})
+
+	_, err := idx.Get("old")
+	if err == nil {
+		t.Fatal("expected missing target error")
+	}
+}
+
+func TestIndex_SetAliasesNilClears(t *testing.T) {
+	idx := NewDocumentationIndex()
+	doc := &Document{ID: "new", Title: "New", Content: "content"}
+	if err := idx.Index(doc); err != nil {
+		t.Fatalf("Index returned error: %v", err)
+	}
+	idx.SetAliases(map[string]string{"old": "new"})
+	idx.SetAliases(nil)
+
+	_, err := idx.Get("old")
+	if err == nil {
+		t.Fatal("expected alias to be cleared")
+	}
+}
+
+func TestIndex_SetAliasesCopiesInput(t *testing.T) {
+	idx := NewDocumentationIndex()
+	doc := &Document{ID: "new", Title: "New", Content: "content"}
+	if err := idx.Index(doc); err != nil {
+		t.Fatalf("Index returned error: %v", err)
+	}
+	aliases := map[string]string{"old": "new"}
+	idx.SetAliases(aliases)
+	aliases["old"] = "missing"
+
+	got, err := idx.Get("old")
+	if err != nil {
+		t.Fatalf("Get alias returned error: %v", err)
+	}
+	if got.ID != "new" {
+		t.Fatalf("expected copied alias to still point to new, got %q", got.ID)
+	}
+}
+
+func TestIndex_CanonicalGetUnchanged(t *testing.T) {
+	idx := NewDocumentationIndex()
+	doc := &Document{ID: "canonical", Title: "Canonical", Content: "content"}
+	if err := idx.Index(doc); err != nil {
+		t.Fatalf("Index returned error: %v", err)
+	}
+
+	got, err := idx.Get("canonical")
+	if err != nil {
+		t.Fatalf("Get canonical returned error: %v", err)
+	}
+	if got.ID != "canonical" {
+		t.Fatalf("expected canonical doc, got %q", got.ID)
+	}
+}
