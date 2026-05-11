@@ -11,6 +11,7 @@ require (
 	github.com/yuin/goldmark v1.7.16
 	golang.org/x/net v0.49.0
 	golang.org/x/time v0.14.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -36,5 +37,4 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
