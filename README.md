@@ -412,6 +412,7 @@ go test -v ./internal/index
 go test -v -tags=property ./...
 
 # Run MCP real-world smoke tests against the actual stdio server process
+# Writes request/response artifacts under outputs/real_world_tests/<timestamp>/
 go run ./scripts/real_world_tests
 ```
 

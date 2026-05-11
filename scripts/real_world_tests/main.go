@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,25 +29,28 @@ type testCase struct {
 }
 
 type testRunner struct {
-	checks   int
-	failures []string
+	checks    int
+	failures  []string
+	outputDir string
+	outputSeq int
 }
 
 func main() {
 	serverPath := flag.String("server", "", "path to an existing nats-docs-mcp-server binary; if empty, build a temporary binary")
 	archivePath := flag.String("archive", "assets/nats.docs-master.zip", "path to the NATS docs archive")
 	cacheDir := flag.String("cache-dir", "", "cache directory for the test server; if empty, use a temporary directory")
+	outputDir := flag.String("output-dir", "outputs/real_world_tests", "directory where per-request output files are written")
 	keepCache := flag.Bool("keep-cache", false, "keep the temporary cache directory after the run")
 	timeout := flag.Duration("timeout", 2*time.Minute, "overall test timeout")
 	flag.Parse()
 
-	if err := run(*serverPath, *archivePath, *cacheDir, *keepCache, *timeout); err != nil {
+	if err := run(*serverPath, *archivePath, *cacheDir, *outputDir, *keepCache, *timeout); err != nil {
 		fmt.Fprintf(os.Stderr, "real-world tests failed: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(serverPath, archivePath, cacheDir string, keepCache bool, timeout time.Duration) error {
+func run(serverPath, archivePath, cacheDir, outputDir string, keepCache bool, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -102,11 +106,17 @@ func run(serverPath, archivePath, cacheDir string, keepCache bool, timeout time.
 		}
 	}
 
+	runOutputDir, err := prepareOutputDir(outputDir)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("Real-world MCP tests\n")
 	fmt.Printf("  repo:    %s\n", repoRoot)
 	fmt.Printf("  server:  %s\n", serverPath)
 	fmt.Printf("  archive: %s\n", archiveAbs)
 	fmt.Printf("  cache:   %s\n\n", cacheDir)
+	fmt.Printf("  outputs: %s\n\n", runOutputDir)
 
 	env := []string{
 		"NATS_DOCS_LOG_LEVEL=error",
@@ -125,7 +135,7 @@ func run(serverPath, archivePath, cacheDir string, keepCache bool, timeout time.
 	defer mcpClient.Close()
 
 	stderrBuffer := captureStderr(mcpClient)
-	runner := &testRunner{}
+	runner := &testRunner{outputDir: runOutputDir}
 
 	if err := initialize(ctx, mcpClient); err != nil {
 		printServerStderr(stderrBuffer)
@@ -163,6 +173,7 @@ func run(serverPath, archivePath, cacheDir string, keepCache bool, timeout time.
 	}
 
 	fmt.Printf("\nPASS real-world tests (%d checks)\n", runner.checks)
+	fmt.Printf("Wrote request outputs to: %s\n", runOutputDir)
 	if keepCache {
 		fmt.Printf("Kept cache directory: %s\n", cacheDir)
 	}
@@ -225,6 +236,10 @@ func (r *testRunner) runToolCase(ctx context.Context, mcpClient *client.Client, 
 	}
 
 	text := toolText(result)
+	if err := r.writeToolOutput(tc, result, text); err != nil {
+		r.fail("%s: write output: %v", tc.name, err)
+		return
+	}
 	if strings.TrimSpace(text) == "" {
 		r.fail("%s: tool returned empty text", tc.name)
 		return
@@ -248,8 +263,13 @@ func (r *testRunner) checkToolError(ctx context.Context, mcpClient *client.Clien
 		r.fail("%s: call failed: %v", tc.name, err)
 		return
 	}
+	text := toolText(result)
+	if err := r.writeToolOutput(tc, result, text); err != nil {
+		r.fail("%s: write output: %v", tc.name, err)
+		return
+	}
 	if !result.IsError {
-		r.fail("%s: expected tool error, got success: %s", tc.name, toolText(result))
+		r.fail("%s: expected tool error, got success: %s", tc.name, text)
 		return
 	}
 	r.pass("%s", tc.name)
@@ -350,6 +370,44 @@ func (r *testRunner) err() error {
 	return errors.New(b.String())
 }
 
+func (r *testRunner) writeToolOutput(tc testCase, result *mcp.CallToolResult, text string) error {
+	if r.outputDir == "" {
+		return nil
+	}
+
+	r.outputSeq++
+	argsJSON, err := json.MarshalIndent(tc.args, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal request args: %w", err)
+	}
+
+	name := fmt.Sprintf("%02d_%s.md", r.outputSeq, slug(tc.name))
+	path := filepath.Join(r.outputDir, name)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", tc.name)
+	fmt.Fprintf(&b, "- Tool: `%s`\n", tc.tool)
+	fmt.Fprintf(&b, "- Is error: `%t`\n\n", result != nil && result.IsError)
+	b.WriteString("## Request Arguments\n\n")
+	b.WriteString("```json\n")
+	b.Write(argsJSON)
+	b.WriteString("\n```\n\n")
+	b.WriteString("## Response\n\n")
+	if strings.TrimSpace(text) == "" {
+		b.WriteString("_No text content returned._\n")
+	} else {
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
+			b.WriteString("\n")
+		}
+	}
+
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	return nil
+}
+
 func buildServer(ctx context.Context, repoRoot string) (string, func(), error) {
 	dir, cleanup, err := tempDir("nats-docs-real-world-bin-")
 	if err != nil {
@@ -369,6 +427,43 @@ func buildServer(ctx context.Context, repoRoot string) (string, func(), error) {
 		return "", nil, fmt.Errorf("build server binary: %w\n%s", err, strings.TrimSpace(string(output)))
 	}
 	return bin, cleanup, nil
+}
+
+func prepareOutputDir(outputDir string) (string, error) {
+	if strings.TrimSpace(outputDir) == "" {
+		return "", fmt.Errorf("output dir cannot be empty")
+	}
+	root, err := filepath.Abs(outputDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output dir: %w", err)
+	}
+	runDir := filepath.Join(root, time.Now().UTC().Format("20060102T150405Z"))
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return "", fmt.Errorf("create output dir: %w", err)
+	}
+	return runDir, nil
+}
+
+func slug(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "request"
+	}
+	return out
 }
 
 func findRepoRoot() (string, error) {
