@@ -1,0 +1,7 @@
+interface:
+  display_name: "NATS Docs"
+  short_description: "Search and retrieve NATS documentation"
+  default_prompt: "Use $nats-docs to answer a NATS documentation question with cited doc URLs."
+
+policy:
+  allow_implicit_invocation: true

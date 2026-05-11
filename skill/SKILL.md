@@ -7,27 +7,31 @@ description: Use when answering questions about NATS, JetStream, nats-server con
 
 Use the standalone `nats-docs` CLI as the primary documentation source. It is MCP-independent and embeds a NATS docs snapshot, so it can run as a single executable.
 
+## CLI Location
+
+When this skill is deployed with its bundled executable, run `./bin/nats-docs` relative to this skill directory. If `nats-docs` is already installed on `PATH`, that is also acceptable.
+
 ## Workflow
 
 1. Check the index when needed:
    ```bash
-   nats-docs doctor
+   ./bin/nats-docs doctor
    ```
 
 2. Search for relevant pages:
    ```bash
-   nats-docs search "<query>" --limit 5
+   ./bin/nats-docs search "<query>" --limit 5
    ```
 
 3. Retrieve the strongest pages by document ID:
    ```bash
-   nats-docs get <doc-id>
+   ./bin/nats-docs get <doc-id>
    ```
 
 4. Use JSON output when parsing results programmatically:
    ```bash
-   nats-docs search "<query>" --limit 5 --json
-   nats-docs get <doc-id> --json
+   ./bin/nats-docs search "<query>" --limit 5 --json
+   ./bin/nats-docs get <doc-id> --json
    ```
 
 5. Cite the returned document title, ID, and URL in answers when facts come from the docs.
